@@ -1,0 +1,91 @@
+name: Sync with Upstream Repository
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at midnight UTC
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/eng-accelerator/ai-accelerator-C3.git || true
+          git fetch upstream --all
+
+      - name: Check for updates
+        id: check_updates
+        run: |
+          COUNT=$(git rev-list --count HEAD..upstream/main 2>/dev/null || echo 0)
+          echo "upstream_changes=$COUNT" >> $GITHUB_OUTPUT
+          git log --oneline HEAD..upstream/main > /tmp/upstream_changes.txt 2>/dev/null || echo "No changes" > /tmp/upstream_changes.txt
+          cat /tmp/upstream_changes.txt
+
+      - name: Merge upstream changes
+        if: steps.check_updates.outputs.upstream_changes > 0
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge upstream/main -m "Sync: Merge upstream changes from ai-accelerator-C3" || true
+
+      - name: Push changes
+        if: steps.check_updates.outputs.upstream_changes > 0
+        run: |
+          git push origin main
+
+      - name: Create notification issue
+        if: steps.check_updates.outputs.upstream_changes > 0
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const changes = fs.existsSync('/tmp/upstream_changes.txt')
+              ? fs.readFileSync('/tmp/upstream_changes.txt', 'utf8')
+              : 'No detailed changes available';
+
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Repository Synced with Upstream',
+              body: `## Repository Sync Notification
+
+Your repository has been synced with the upstream repository.
+
+**Upstream Repository:** https://github.com/eng-accelerator/ai-accelerator-C3
+
+**Changes detected:** ${{ steps.check_updates.outputs.upstream_changes }}
+
+**Last upstream commits:**
+
+\`\`\`
+${changes}
+\`\`\`
+
+**Action:** Automatic merge was performed
+
+Please review the merged changes and ensure everything works as expected.`,
+              labels: ['sync', 'upstream']
+            });
+
+      - name: Send success notification
+        if: success() && steps.check_updates.outputs.upstream_changes > 0
+        run: |
+          echo "Sync completed successfully!"
+          echo "Changes from upstream were merged into main branch."
+
+      - name: Send no-changes notification
+        if: steps.check_updates.outputs.upstream_changes == 0
+        run: |
+          echo "Repository is already in sync with upstream."
+          echo "No changes detected."
