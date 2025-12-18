@@ -23,7 +23,7 @@ jobs:
       - name: Add upstream remote
         run: |
           git remote add upstream https://github.com/eng-accelerator/ai-accelerator-C3.git || true
-          git fetch upstream --all
+          git fetch upstream 
 
       - name: Check for updates
         id: check_updates
